@@ -40,9 +40,10 @@ export class Room {
 
       if (role === 'host') {
         this.host = server;
+        if (this.guest) this.send(this.guest, { type: 'opponent_joined' });
       } else {
         this.guest = server;
-        this.send(this.host, { type: 'opponent_joined' });
+        if (this.host) this.send(this.host, { type: 'opponent_joined' });
       }
 
       server.addEventListener('message', (event) => {
