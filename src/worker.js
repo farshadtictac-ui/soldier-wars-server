@@ -3,8 +3,12 @@
 //   GET /create              -> returns a fresh, unused 4-digit room code
 //   GET /connect?code=XXXX&role=host|guest  (WebSocket upgrade)
 //                             -> pairs this connection into that room
+//   GET /quickmatch (WebSocket upgrade)
+//                             -> pairs this connection with a random
+//                                stranger who's also looking for a match
 
 export { Room } from './room.js';
+export { Lobby } from './lobby.js';
 
 function corsHeaders() {
   return {
@@ -58,6 +62,12 @@ export default {
       const forwardUrl = new URL('https://room/connect');
       forwardUrl.searchParams.set('role', role);
       return stub.fetch(forwardUrl.toString(), request);
+    }
+
+    if (url.pathname === '/quickmatch') {
+      const id = env.LOBBY.idFromName('public-lobby');
+      const stub = env.LOBBY.get(id);
+      return stub.fetch('https://lobby/quickmatch', request);
     }
 
     if (url.pathname === '/' || url.pathname === '') {
