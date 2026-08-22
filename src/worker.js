@@ -6,20 +6,29 @@
 //   GET /quickmatch (WebSocket upgrade)
 //                             -> pairs this connection with a random
 //                                stranger who's also looking for a match
+//   POST /log                -> records a play/result event (private)
+//   GET /admin/logs?key=XXXX -> view the private play log (owner only)
 
 export { Room } from './room.js';
 export { Lobby } from './lobby.js';
+export { Stats } from './stats.js';
 
 function corsHeaders() {
   return {
     'Access-Control-Allow-Origin': '*',
-    'Access-Control-Allow-Methods': 'GET, OPTIONS',
+    'Access-Control-Allow-Methods': 'GET, POST, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
   };
 }
 
 function randomCode() {
   return String(Math.floor(1000 + Math.random() * 9000));
+}
+
+function escapeHtml(str) {
+  return String(str == null ? '' : str).replace(/[&<>"']/g, (c) => (
+    { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]
+  ));
 }
 
 export default {
@@ -68,6 +77,50 @@ export default {
       const id = env.LOBBY.idFromName('public-lobby');
       const stub = env.LOBBY.get(id);
       return stub.fetch('https://lobby/quickmatch', request);
+    }
+
+    if (url.pathname === '/log' && request.method === 'POST') {
+      const id = env.STATS.idFromName('global-stats');
+      const stub = env.STATS.get(id);
+      const res = await stub.fetch('https://stats/log', request);
+      const headers = new Headers(res.headers);
+      Object.entries(corsHeaders()).forEach(([k, v]) => headers.set(k, v));
+      return new Response(await res.text(), { status: res.status, headers });
+    }
+
+    if (url.pathname === '/admin/logs') {
+      const key = url.searchParams.get('key') || '';
+      if (!env.ADMIN_KEY || key !== env.ADMIN_KEY) {
+        return new Response('Unauthorized', { status: 401 });
+      }
+      const id = env.STATS.idFromName('global-stats');
+      const stub = env.STATS.get(id);
+      const res = await stub.fetch('https://stats/logs');
+      const entries = await res.json();
+      const rows = entries.map(e => `
+        <tr>
+          <td>${escapeHtml(e.time)}</td>
+          <td>${escapeHtml(e.event)}</td>
+          <td>${escapeHtml(e.telegramId)}</td>
+          <td>${escapeHtml(e.nickname)}</td>
+          <td>${escapeHtml(e.opponentNickname)}</td>
+          <td>${escapeHtml(e.result)}</td>
+          <td>${escapeHtml(e.mode)}</td>
+        </tr>`).join('');
+      const html = `<!DOCTYPE html><html><head><meta charset="utf-8">
+        <title>Soldier Wars — Play Log</title>
+        <style>
+          body{font-family:sans-serif;background:#1a1108;color:#f0e6d2;padding:20px;}
+          table{border-collapse:collapse;width:100%;font-size:13px;}
+          th,td{border:1px solid #5a4a30;padding:6px 10px;text-align:left;}
+          th{background:#3a2c18;}
+          tr:nth-child(even){background:#241a10;}
+        </style></head><body>
+        <h2>⚔️ Soldier Wars — Private Play Log</h2>
+        <p>${entries.length} entries</p>
+        <table><tr><th>Time (UTC)</th><th>Event</th><th>Telegram ID</th><th>Nickname</th><th>Opponent</th><th>Result</th><th>Mode</th></tr>${rows}</table>
+        </body></html>`;
+      return new Response(html, { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
     }
 
     if (url.pathname === '/' || url.pathname === '') {
