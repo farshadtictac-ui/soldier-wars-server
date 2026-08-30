@@ -6,10 +6,15 @@
 //   GET /quickmatch (WebSocket upgrade)
 //                             -> pairs this connection with a random
 //                                stranger who's also looking for a match
+//   GET /create4              -> returns a fresh, unused 4-digit room code
+//                                for a 4-player room
+//   GET /connect4?code=XXXX&role=host|guest  (WebSocket upgrade)
+//                             -> joins a 4-player room (seat N = host)
 //   POST /log                -> records a play/result event (private)
 //   GET /admin/logs?key=XXXX -> view the private play log (owner only)
 
 export { Room } from './room.js';
+export { Room4 } from './room4.js';
 export { Lobby } from './lobby.js';
 export { Stats } from './stats.js';
 
@@ -79,6 +84,38 @@ export default {
       return stub.fetch('https://lobby/quickmatch', request);
     }
 
+    if (url.pathname === '/create4') {
+      for (let attempt = 0; attempt < 8; attempt++) {
+        const code = randomCode();
+        const id = env.ROOM4.idFromName(code);
+        const stub = env.ROOM4.get(id);
+        const statusRes = await stub.fetch('https://room4/status');
+        const status = await statusRes.json();
+        if (status.count === 0) {
+          return new Response(JSON.stringify({ code }), {
+            headers: { 'Content-Type': 'application/json', ...corsHeaders() },
+          });
+        }
+      }
+      return new Response(JSON.stringify({ error: 'Could not allocate room, try again' }), {
+        status: 503,
+        headers: { 'Content-Type': 'application/json', ...corsHeaders() },
+      });
+    }
+
+    if (url.pathname === '/connect4') {
+      const code = (url.searchParams.get('code') || '').trim();
+      const role = url.searchParams.get('role') || 'guest';
+      if (!/^\d{4}$/.test(code)) {
+        return new Response('Invalid room code', { status: 400 });
+      }
+      const id = env.ROOM4.idFromName(code);
+      const stub = env.ROOM4.get(id);
+      const forwardUrl = new URL('https://room4/connect');
+      forwardUrl.searchParams.set('role', role);
+      return stub.fetch(forwardUrl.toString(), request);
+    }
+
     if (url.pathname === '/log' && request.method === 'POST') {
       const id = env.STATS.idFromName('global-stats');
       const stub = env.STATS.get(id);
@@ -100,6 +137,7 @@ export default {
       const rows = entries.map(e => `
         <tr>
           <td>${escapeHtml(e.time)}</td>
+          <td>${escapeHtml(e.game)}</td>
           <td>${escapeHtml(e.event)}</td>
           <td>${escapeHtml(e.telegramId)}</td>
           <td>${escapeHtml(e.nickname)}</td>
@@ -116,9 +154,9 @@ export default {
           th{background:#3a2c18;}
           tr:nth-child(even){background:#241a10;}
         </style></head><body>
-        <h2>⚔️ Soldier Wars — Private Play Log</h2>
+        <h2>⚔️ Tactical Arcade — Private Play Log</h2>
         <p>${entries.length} entries</p>
-        <table><tr><th>Time (UTC)</th><th>Event</th><th>Telegram ID</th><th>Nickname</th><th>Opponent</th><th>Result</th><th>Mode</th></tr>${rows}</table>
+        <table><tr><th>Time (UTC)</th><th>Game</th><th>Event</th><th>Telegram ID</th><th>Nickname</th><th>Opponent</th><th>Result</th><th>Mode</th></tr>${rows}</table>
         </body></html>`;
       return new Response(html, { headers: { 'Content-Type': 'text/html; charset=utf-8' } });
     }
